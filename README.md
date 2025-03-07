@@ -9,3 +9,5 @@ This script will do the following:
 5. Based on the size of the disk, it will estimate how long the wipe will take.
 6. Wipes disk and writes 0's to every sector.
 7. Once done cleans up any temp files and exits.
+
+![image](https://github.com/user-attachments/assets/93357ff3-7eac-49c6-9839-ac2004d7e9ec)
