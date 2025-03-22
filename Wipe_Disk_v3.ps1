@@ -24,6 +24,7 @@ Add-Type @"
 # ----------------------------
 # 0. Only allow one instance
 # ----------------------------
+$restart = $true
 $mutexName = "Global\DiskWipeMutex"
 [bool]$isNew = $false
 $mutex = [System.Threading.Mutex]::New($false, $mutexName, [ref]$isNew)
@@ -37,6 +38,8 @@ if (-not $isNew) {
 # ----------------------------
 # 1. Disk Selection Form
 # ----------------------------
+while ($restart) {
+$restart = $false
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "Select Disk to Wipe"
 $form.Size = New-Object System.Drawing.Size(400, 150)
@@ -100,6 +103,22 @@ $cancelButton.Add_Click({
     $form.Close()
 })
 $form.Controls.Add($cancelButton)
+
+# Refresh Button
+$refreshButton = New-Object System.Windows.Forms.Button
+$refreshButton.Text = "Refresh"
+$refreshButton.Location = New-Object System.Drawing.Point(180, $buttonY)
+$refreshButton.Add_Click({
+    # Clear and re-populate the ComboBox with the current list of disks
+    $comboBox.Items.Clear()
+    Get-Disk | ForEach-Object {
+        $comboBox.Items.Add("Disk $($_.Number): $($_.FriendlyName), $([math]::Round($_.Size / 1GB, 2)) GB")
+    }
+    [System.Windows.Forms.MessageBox]::Show("Drive list has been refreshed.", "Refreshed",
+        [System.Windows.Forms.MessageBoxButtons]::OK,
+        [System.Windows.Forms.MessageBoxIcon]::Information)
+})
+$form.Controls.Add($refreshButton)
 
 $form.ShowDialog()
 $diskNumber = $form.Tag
@@ -273,9 +292,22 @@ while ($progressForm.Visible) {
     # Check if DiskPart has finished
     if ($processID -and (-not (Get-Process -Id $processID -ErrorAction SilentlyContinue))) {
         $progressForm.Close()
-        [System.Windows.Forms.MessageBox]::Show("Disk $diskNumber has been securely wiped.", "Completed", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
-        break
+    
+        # Create a custom dialog with options
+        $dialogResult = [System.Windows.Forms.MessageBox]::Show(
+            "Disk $diskNumber has been securely wiped. Do you want to wipe another disk?",
+            "Completed",
+            [System.Windows.Forms.MessageBoxButtons]::YesNo,
+            [System.Windows.Forms.MessageBoxIcon]::Information
+        )
+
+        if ($dialogResult -eq [System.Windows.Forms.DialogResult]::Yes) {
+            $restart = $true
+        } else {
+            break
+        }
     }
+}
 }
 
 # ----------------------------
