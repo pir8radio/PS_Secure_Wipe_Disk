@@ -144,11 +144,98 @@ if ($disk.Size -eq 0) {
 # ----------------------------
 # 2. Estimate Time & Confirm
 # ----------------------------
-$diskSizeGB = [math]::Ceiling($disk.Size / 1GB)
-$estimatedTimeSeconds = $diskSizeGB * 10
+function Test-WriteSpeed {
+    param (
+        [int]$diskNumber,
+        [string]$diskPath
+    )
+
+    $tempFilePath = "$diskPath\tempfile.bin"
+    $blockSize = 64MB
+    $totalSize = 1GB
+    $totalWrites = $totalSize / $blockSize
+
+    # Create a temporary file to test write speed
+    try {
+        # Start the timer
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        
+        for ($i = 0; $i -lt $totalWrites; $i++) {
+            $data = New-Object byte[] ($blockSize)
+            [System.IO.File]::WriteAllBytes($tempFilePath, $data)
+        }
+        
+        # Stop the timer
+        $stopwatch.Stop()
+        
+        # Calculate the write speed in MB/s
+        $writeSpeedMBps = $totalSize / $stopwatch.Elapsed.TotalSeconds / 1MB
+        
+        # Clean up the temporary file
+        Remove-Item -Path $tempFilePath -Force -ErrorAction SilentlyContinue
+
+        return $writeSpeedMBps
+    }
+    catch {
+        return $null
+    }
+}
+
+# Create a loading screen
+function Show-LoadingScreen {
+    $loadingForm = New-Object System.Windows.Forms.Form
+    $loadingForm.Text = "Testing disk write speed, please wait..."
+    $loadingForm.Size = New-Object System.Drawing.Size(300, 100)
+    $loadingForm.StartPosition = "CenterScreen"
+    $loadingForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
+    $loadingForm.ControlBox = $false
+    $loadingForm.TopMost = $true
+
+    $loadingForm.Show()
+    return $loadingForm
+}
+
+# Find the drive letter for the selected disk
+$diskPath = $null
+$partitions = Get-Partition -DiskNumber $diskNumber
+
+foreach ($partition in $partitions) {
+    $volume = Get-Volume -Partition $partition
+    if ($volume.DriveLetter) {
+        $diskPath = "$($volume.DriveLetter):\"
+        break
+    }
+}
+
+if (-not $diskPath) {
+    [System.Windows.Forms.MessageBox]::Show("No drive letter found for disk $diskNumber. Using estimated speed.", "Information", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
+}
+
+# Show the loading screen
+$loadingScreen = Show-LoadingScreen
+
+# Test the write speed
+$writeSpeedMBps = $null
+if ($diskPath) {
+    $writeSpeedMBps = Test-WriteSpeed -diskNumber $diskNumber -diskPath $diskPath
+}
+
+# Close the loading screen
+$loadingScreen.Close()
+
+if ($writeSpeedMBps -eq $null) {
+    # Fall back to 10 seconds per GB if write speed cannot be determined
+    $diskSizeGB = [math]::Ceiling($disk.Size / 1GB)
+    $estimatedTimeSeconds = $diskSizeGB * 10
+} else {
+    # Estimate time based on write speed
+    $diskSizeMB = [math]::Ceiling($disk.Size / 1MB)
+    $estimatedTimeSeconds = $diskSizeMB / $writeSpeedMBps
+}
+
 $hours = [math]::Floor($estimatedTimeSeconds / 3600)
 $minutes = [math]::Floor(($estimatedTimeSeconds % 3600) / 60)
-$seconds = $estimatedTimeSeconds % 60
+$seconds = [math]::Round($estimatedTimeSeconds % 60)
 
 # Confirmation Form
 $confirmForm = New-Object System.Windows.Forms.Form
@@ -194,11 +281,9 @@ $confirmForm.Controls.Add($confirmCancelButton)
 $confirmForm.ShowDialog()
 
 if ($confirmForm.Tag -eq "CANCEL") {
-    Write-Host "Disk wipe operation canceled by user."
+    [System.Windows.Forms.MessageBox]::Show("Disk wipe operation canceled by user.", "Information", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Information)
     exit
 }
-
-Write-Host "Proceeding with disk wipe for Disk $diskNumber..."
 
 # ----------------------------
 # 3. Run DiskPart
@@ -281,7 +366,7 @@ while ($progressForm.Visible) {
     $remainingSeconds = $estimatedTimeSeconds - $elapsed
     $hours = [math]::Floor($remainingSeconds / 3600)
     $minutes = [math]::Floor(($remainingSeconds % 3600) / 60)
-    $seconds = $remainingSeconds % 60
+    $seconds = [math]::Round($remainingSeconds % 60)
     $progressLabel.Text = "Estimated time remaining: $hours hours $minutes minutes $seconds seconds"
     
     # Pump UI messages
